@@ -47,8 +47,7 @@ RUN python3 -m venv ${VENV_DIR} && \
     jupyter nbextension install    --sys-prefix --py nbrsessionproxy && \
     jupyter nbextension enable     --sys-prefix --py nbrsessionproxy
 
-RUN R --quiet -e "install.packages('devtools', dependencies=TRUE)" && \
-    R --quiet -e "devtools::install_github('IRkernel/IRkernel')" && \
+RUN R --quiet -e "devtools::install_github('IRkernel/IRkernel')" && \
     R --quiet -e "IRkernel::installspec(prefix='${VENV_DIR}')"
 
 CMD jupyter notebook --ip 0.0.0.0
