@@ -1,4 +1,4 @@
-FROM rocker/binder:latest
+FROM awsmdocker/msr2019-docker:latest
 
 ## Copies your repo files into the Docker Container
 USER root
