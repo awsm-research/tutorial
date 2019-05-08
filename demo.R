@@ -1,32 +1,10 @@
 setwd(dirname(rstudioapi::getActiveDocumentContext()$path))  # Only when using RStudio
 getwd()
 
-options(warn=-1)
+source("import.R")
 
-library(Rnalytica)
-library(ggplot2)
-library(car)
-library(effects)
-library(ScottKnottESD)
-library(gridExtra)
-library(effsize)
-library(dplyr)
-library(rms)
-library(Rnalytica)
-library(C50)
-library(randomForest)
-library(FFTrees)
-library(gridExtra)
-library(caret)
-library(DMwR)
-
-eclipse <- loadDefectDataset("eclipse-2.0")
-
-data <- eclipse$data
-indep <- eclipse$indep
-dep <- eclipse$dep
-data[,dep] <- factor(data[,dep])
 str(data[,indep])
+
 table(data[,dep])/nrow(data)
 
 ################################################
@@ -129,7 +107,7 @@ f <- as.formula(paste( "post", '~', paste(indep, collapse = "+")))
 rf.model <- randomForest(f, data = data, importance = TRUE, keep.forest=TRUE)
 print(rf.model)
 pdf("figures/3-rf.pdf", width=8, height=6)
-varImpPlot(rf.model)
+varImpPlot(rf.model, type="1")
 dev.off()
 
 # FAST-AND-FRUGAL TREE MODEL
@@ -142,7 +120,7 @@ plot(fft.model)
 dev.off()
 
 ################################################
-# STEP4: Explore different learning algorithms
+# STEP4: Explore different parameter settings
 ################################################
 
 # results <- list()
@@ -183,19 +161,6 @@ results <- readRDS("figures/parameter-settings.rds")
 ggplot(melt(results[["AUC"]]), aes(x=reorder(Var2, -value, median), y=value)) + geom_boxplot()  + ylab("AUC") + xlab("") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + scale_y_continuous(breaks = 10:18*0.05, labels = 10:18*0.05, limit=c(0.5,0.9))
 ggsave("figures/4-parameter-settings.pdf",width=4,height=4)
 
-
-levels <- c("C50.100trials","RF.100trees","C50.1trial","RF.10trees","GLM")
-g1<- ggplot(melt(data.frame(results[["Fmeasure(0.5)"]])), aes(x=factor(variable, levels=levels), y=value)) + geom_boxplot()  + ylab("F-measure (0.5)") + xlab("") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + scale_y_continuous(labels=0:7*0.1, breaks=0:7*0.1, limit=c(0, 0.7))
-
-g2<- ggplot(melt(data.frame(results[["Fmeasure(0.8)"]]),na.rm=TRUE), aes(x=factor(variable, levels=levels), y=value)) + geom_boxplot() + ylab("F-measure (0.8)") + xlab("") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + scale_y_continuous(labels=0:7*0.1, breaks=0:7*0.1, limit=c(0, 0.7))
-
-g3<- ggplot(melt(data.frame(results[["Fmeasure(0.2)"]]),na.rm=TRUE), aes(x=factor(variable, levels=levels), y=value)) + geom_boxplot()  + ylab("F-measure (0.2)") + xlab("") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + scale_y_continuous(labels=0:7*0.1, breaks=0:7*0.1, limit=c(0, 0.7))
-
-pdf("figures/Dont2-probability-thresholds.pdf",width=10,height=4)
-grid.arrange(g1,g2,g3,ncol=3)
-dev.off()   
-
-
 ############################################################
 # STEP5: USE OUT-OF-SAMPLE BOOTSTRAP
 ############################################################
@@ -211,7 +176,7 @@ for(i in seq(1,100)){
   testing <- data[-indices,]
   
   m <- glm(f, data = training, family="binomial")
-  predictions <- predict(glm.model, testing, type="response")
+  predictions <- predict(m, testing, type="response")
   performance <- performance.calculation(testing[,dep], predictions)
   results <- rbind(results, c(method="100 Bootstrap",performance["AUC"]))
 }
@@ -225,7 +190,7 @@ for(i in seq(1,10)){
     testing <- data[-indices[[i]],]
     
     m <- glm(f, data = training, family="binomial")
-    predictions <- predict(glm.model, testing, type="response")
+    predictions <- predict(m, testing, type="response")
     performance <- performance.calculation(testing[,dep], predictions)
     results <- rbind(results, c(method="10X10-Fold CV",performance["AUC"]))
   }
@@ -288,14 +253,11 @@ glm(post ~  1, data=data, family="binomial")$deviance - glm(post ~  MaxInheritan
 ### The Deviance of MaxInheritanceTree for ANOVA Type-II
 glm(post ~  CountClassDerived + AvgLineBlank  +  MINOR_LINE + CountClassCoupled, data=data, family="binomial")$deviance-glm(post ~  MaxInheritanceTree + CountClassDerived + AvgLineBlank  +  MINOR_LINE + CountClassCoupled, data=data, family="binomial")$deviance
 
-# Risks or reordering
+# The risks of reordering model specification
 
 indep1 <- c("NSF_max","NSM_max","NOF_max","ACD")
 f <- as.formula(paste0(dep, " ~ ", paste0(indep1,collapse = "+")))
 m <- glm(f, data=data, family="binomial")
-
-anova(m)
-Anova(m)
 
 importance1 <- data.frame(Type1.1=anova(m)$Deviance[-1], Type2.1=Anova(m,type="2",test="LR")$"LR Chisq")
 rownames(importance1) <- indep1
@@ -310,6 +272,22 @@ importance <- data.frame(importance1[indep1,],importance2[indep1,])
 importance <- data.frame(apply(importance, 2, function(x){x/sum(abs(x))}))
 
 round(importance[order(-importance$Type2.1),], digit=2)*100
+
+################################################
+# DON’T CHANGE PROBABILITY THRESHOLD
+################################################
+
+results <- readRDS("figures/parameter-settings.rds")
+levels <- c("C50.100trials","RF.100trees","C50.1trial","RF.10trees","GLM")
+g1<- ggplot(melt(data.frame(results[["Fmeasure(0.5)"]])), aes(x=factor(variable, levels=levels), y=value)) + geom_boxplot()  + ylab("F-measure (0.5)") + xlab("") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + scale_y_continuous(labels=0:7*0.1, breaks=0:7*0.1, limit=c(0, 0.7))
+
+g2<- ggplot(melt(data.frame(results[["Fmeasure(0.8)"]]),na.rm=TRUE), aes(x=factor(variable, levels=levels), y=value)) + geom_boxplot() + ylab("F-measure (0.8)") + xlab("") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + scale_y_continuous(labels=0:7*0.1, breaks=0:7*0.1, limit=c(0, 0.7))
+
+g3<- ggplot(melt(data.frame(results[["Fmeasure(0.2)"]]),na.rm=TRUE), aes(x=factor(variable, levels=levels), y=value)) + geom_boxplot()  + ylab("F-measure (0.2)") + xlab("") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + scale_y_continuous(labels=0:7*0.1, breaks=0:7*0.1, limit=c(0, 0.7))
+
+pdf("figures/Dont2-probability-thresholds.pdf",width=10,height=4)
+grid.arrange(g1,g2,g3,ncol=3)
+dev.off()  
 
 ################################################
 # DON’T REBALANCE THE DATA
