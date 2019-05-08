@@ -1,6 +1,6 @@
-# Specifying an R environment with a runtime.txt file
+# Software Analytics 101
 
-Jupyter+R: [![Binder](http://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/awsm-research/mining-software-defects/master?filepath=demo.R)
+Jupyter+R: [![Binder](http://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/awsm-research/mining-software-defects/master?filepath=Modelling-Software-Data.ipynb)
 
 RStudio: [![Binder](http://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/awsm-research/mining-software-defects/master?urlpath=rstudio)
 
