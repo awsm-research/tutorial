@@ -1,4 +1,8 @@
-setwd("~/Research/softwareanalytics101")
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))  # Only when using RStudio
+getwd()
+
+options(warn=-1)
+
 library(Rnalytica)
 library(ggplot2)
 library(car)
@@ -9,7 +13,6 @@ library(effsize)
 library(dplyr)
 library(rms)
 library(Rnalytica)
-library(rsq)
 library(C50)
 library(randomForest)
 library(FFTrees)
@@ -17,254 +20,231 @@ library(gridExtra)
 library(caret)
 library(DMwR)
 
+eclipse <- loadDefectDataset("eclipse-2.0")
 
-lucene <- loadDefectDataset("lucene-2.3.0")
-data <- lucene$data
-indep <- lucene$indep
-dep <- lucene$dep
-
+data <- eclipse$data
+indep <- eclipse$indep
+dep <- eclipse$dep
+data[,dep] <- factor(data[,dep])
+str(data[,indep])
 table(data[,dep])/nrow(data)
 
 ################################################
-# Intro to logistic regression
+# INTRO: BASIC REGRESSION ANALYSIS (Slide 8)
+################################################
 
-m <- glm(RealBug ~ SumCyclomatic, data = data, family="binomial")
-
-
-pdf("intro-regression.pdf",width=4, height=3)
+m <- glm(post ~ CC_max, data = data, family="binomial")
+summary(m)
+pdf("figures/0-intro-regression.pdf",width=4, height=3)
 plot(allEffects(m))
 dev.off()
 
 ################################################
+# INTRO: PRELIMINARY DATA ANALYSIS
+################################################
 
-# STEP1: INCLUDE OTHER METRICS
+# Check data distribution
+summary(data$CC_sum)
 
-m1 <- glm(RealBug ~ SumCyclomatic, data = data, family="binomial")
-Anova(m1)
+# Hypothesis Testing (CC)
+wilcox.test(data[data$post==TRUE,]$CC_sum, data[data$post==FALSE,]$CC_sum)
 
-m2 <- glm(RealBug ~ CountLine + SumCyclomatic, data = data, family="binomial")
-Anova(m2)
+# Generate a density plot
+ggplot(data, aes(x=CC_sum, fill=post)) + geom_density(alpha=.3) + scale_x_log10() + theme_bw()
+ggsave("2.1-density-plot.pdf", width=4, height=2)
 
-# STEP2: REMOVE HIGHLY-CORRELATED METRICS
+# Hypothesis Testing (CC) / alternative
+wilcox.test(data[data$post==TRUE,]$CC_sum, data[data$post==FALSE,]$CC_sum, alternative = "greater")
+wilcox.test(data[data$post==TRUE,]$CC_sum, data[data$post==FALSE,]$CC_sum, alternative = "less")
 
+# Effect size analysis
+cliff.delta(data[data$post==TRUE,]$CC_sum, data[data$post==FALSE,]$CC_sum)
 
-pdf("2-varclus.pdf", width=12, height=7)
+################################################
+# STEP1: INCLUDE CONTROL METRICS (Slide 12)
+################################################
+
+m1 <- glm(post ~ CC_max + PAR_max + FOUT_max, data = data, family="binomial")
+anova(m1)
+
+m2 <- glm(post ~ TLOC + CC_max + PAR_max + FOUT_max, data = data, family="binomial")
+anova(m2)
+
+importance <- data.frame(m1=c(0,anova(m1)$Deviance[-1]), m2=anova(m2)$Deviance[-1])
+importance <- data.frame(apply(importance, 2, function(x){x/sum(abs(x))}))
+rownames(importance) <- c("TLOC","CC_max","PAR_max","FOUT_max")
+round(importance,digit=2)*100
+
+################################################
+# STEP2: REMOVE CORRELATED METRICS
+################################################
+
+# THE RISKS OF NOT REMOVING CORRELATED METRICS  (Slide 14)
+
+m1 <- glm(post ~ CC_max + + CC_avg + PAR_max + FOUT_max, data = data, family="binomial")
+anova(m1)
+
+m2 <- glm(post ~ CC_avg + CC_max + PAR_max + FOUT_max, data = data, family="binomial")
+anova(m2)
+
+importance <- data.frame(m1=anova(m1)$Deviance[-1], m2=anova(m2)$Deviance[c(3,2,4,5)])
+importance <- data.frame(apply(importance, 2, function(x){x/sum(abs(x))}))
+rownames(importance) <- c("CC_max","CC_avg","PAR_max","FOUT_max")
+round(importance,digit=2)*100
+
+# SPEARMAN'S CORRELATION ANALYSIS  (Slide 15)
+indep <- eclipse$indep
+pdf("figures/2-varclus.pdf", width=10, height=5)
 plot(varclus(as.matrix(data[,indep]), similarity="spear", trans="abs"))
 abline(h=0.3, col="red")
 dev.off()
 
-# Auomated Feature Selection (AutoSpearman)
-
-
-pdf("2-autospearman.pdf", width=12, height=7)
-filter <- AutoSpearman(data, indep)
-plot(varclus(as.matrix(data[,indep]), similarity="spear", trans="abs"))
+# AutoSpearman: AUTOMATICALLY REMOVE CORRELATED METRICS
+library(Rnalytica)
+pdf("figures/2-autospearman.pdf", width=5, height=5)
+filterindep <- AutoSpearman(data, indep)
+plot(varclus(as.matrix(data[, filterindep]), similarity="spear", trans="abs"))
 abline(h=0.3, col="red")
 dev.off()
 
-f <- as.formula(paste( "RealBug", '~', paste(indep, collapse = "+")))
-m3 <- glm(f, data = data, family="binomial")
-rsq(m3)
-f <- as.formula(paste( "RealBug", '~', paste(filter, collapse = "+")))
-m4 <- glm(f, data = data, family="binomial")
-rsq(m4)
-rsq <- function(model){return(1-(model$deviance/model$null.deviance))}
+################################################
+# STEP3: BUILD EXPLAINABLE MODELS
+################################################
 
+indep <- AutoSpearman(data, eclipse$indep)
 
-# STEP3: Explore different learning algorithms
-
-
-indep <- c("OWN_COMMIT","MaxInheritanceTree", "CountDeclInstanceVariable")
-tree.model <- C5.0(x = data[, indep], y = data[,dep])
+# DECISION TREE-BASED MODEL
+tree.model <- C5.0(x = data[,indep], y = data[,dep])
 summary(tree.model)
-pdf("3-tree.pdf", width=8, height=7)
+pdf("figures/3-tree.pdf", width=30, height=15)
 plot(tree.model)
 dev.off()
 
+# RULE-BASED MODEL
 rule.model <- C5.0(x = data[, indep], y = data[,dep], rules = TRUE)
 summary(rule.model)
 
-
-f <- as.formula(paste( "RealBug", '~', paste(indep, collapse = "+")))
+# RANDOM FOREST MODEL
+f <- as.formula(paste( "post", '~', paste(indep, collapse = "+")))
 rf.model <- randomForest(f, data = data, importance = TRUE, keep.forest=TRUE)
 print(rf.model)
-pdf("3-rf.pdf", width=8, height=6)
+pdf("figures/3-rf.pdf", width=8, height=6)
 varImpPlot(rf.model)
 dev.off()
 
+# FAST-AND-FRUGAL TREE MODEL
+f <- as.formula(paste( "post", '~', paste(indep, collapse = "+")))
 fft.model <- FFTrees(formula = f, data = data)
 print(fft.model)
 
-pdf("3-fftrees.pdf", width=8, height=8)
+pdf("figures/3-fftrees.pdf", width=8, height=8)
 plot(fft.model)
 dev.off()
 
-############################################################
+################################################
+# STEP4: Explore different learning algorithms
+################################################
 
-# STEP4: Explore different parameter settings
+# results <- list()
+# for(i in seq(1,10)){
+#   set.seed(i)
+#   indices <- sample(nrow(data), replace=TRUE)
+#   training <- data[indices,]
+#   testing <- data[-indices,]
+#   indep <- AutoSpearman(training, eclipse$indep)
+#   f <- as.formula(paste( "post", '~', paste(indep, collapse = "+")))
+#   
+#   glm.model <- glm(f, data = training, family="binomial")
+#   defaulttree.model <- C5.0(x = training[, indep], y = training[,dep], rules=TRUE, trials=1)
+#   optimaltree.model <- C5.0(x = training[, indep], y = training[,dep], rules=TRUE, trials=100)
+#   rf10trees.model <- randomForest(f, data = training, importance = TRUE, ntree=10)
+#   rf100trees.model <- randomForest(f, data = training, importance = TRUE, ntree=100)
+# 
+#   predictions <- data.frame(
+#     GLM = predict(glm.model, testing, type="response"),
+#     C50.1trial = predict(defaulttree.model, testing, type="prob")[,"TRUE"],
+#     C50.100trials = predict(optimaltree.model, testing, type="prob")[,"TRUE"],
+#     RF.10trees = predict(rf10trees.model, testing, type="prob")[,"TRUE"],
+#     RF.100trees = predict(rf100trees.model, testing, type="prob")[,"TRUE"]
+#   )
+#   performance <- apply(predictions, 2, function(x) performance.calculation(testing[,dep], x))
+#   results[["AUC"]] <- rbind(results[["AUC"]], performance["AUC",])
+#   results[["Fmeasure(0.5)"]] <- rbind(results[["Fmeasure(0.5)"]], performance["Fmeasure",])
+#   
+#   performance <- apply(predictions, 2, function(x) performance.calculation(testing[,dep], x, threshold = 0.2))
+#   results[["Fmeasure(0.2)"]] <- rbind(results[["Fmeasure(0.2)"]], performance["Fmeasure",])
+#   
+#   performance <- apply(predictions, 2, function(x) performance.calculation(testing[,dep], x, threshold = 0.8))
+#   results[["Fmeasure(0.8)"]] <- rbind(results[["Fmeasure(0.8)"]], performance["Fmeasure",])
+# }
+# saveRDS(results, "figures/parameter-settings.rds")
 
-results <- list()
+results <- readRDS("figures/parameter-settings.rds")
+ggplot(melt(results[["AUC"]]), aes(x=reorder(Var2, -value, median), y=value)) + geom_boxplot()  + ylab("AUC") + xlab("") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + scale_y_continuous(breaks = 10:18*0.05, labels = 10:18*0.05, limit=c(0.5,0.9))
+ggsave("figures/4-parameter-settings.pdf",width=4,height=4)
 
 
-for(i in seq(1,100)){
-  set.seed(i)
-  indices <- sample(nrow(data), replace=TRUE)
-  training <- data[indices,]
-  testing <- data[-indices,]
-  indep <- AutoSpearman(training, lucene$indep)
-  f <- as.formula(paste( "RealBug", '~', paste(indep, collapse = "+")))
-  
-  glm.model <- glm(f, data = training, family="binomial")
-  defaulttree.model <- C5.0(x = training[, indep], y = training[,dep], rules=TRUE, trials=1)
-  optimaltree.model <- C5.0(x = training[, indep], y = training[,dep], rules=TRUE, trials=100)
-  rf10trees.model <- randomForest(f, data = training, importance = TRUE, ntree=10)
-  rf100trees.model <- randomForest(f, data = training, importance = TRUE, ntree=100)
-  fft.model <- FFTrees(formula=f, data = training)
-  
-  predictions <- data.frame(
-    GLM = predict(glm.model, testing, type="response"),
-    C50.1trial = predict(defaulttree.model, testing, type="prob")[,"TRUE"],
-    C50.100trials = predict(optimaltree.model, testing, type="prob")[,"TRUE"],
-    RF.10trees = predict(rf10trees.model, testing, type="prob")[,"TRUE"],
-    RF.100trees = predict(rf100trees.model, testing, type="prob")[,"TRUE"],
-    FFTrees = predict(fft.model, testing, type="prob")[,2]
-  )
-  performance <- apply(predictions, 2, function(x) performance.calculation(testing[,dep], x))
-  results[["AUC"]] <- rbind(results[["AUC"]], performance["AUC",])
-  results[["Fmeasure(0.5)"]] <- rbind(results[["Fmeasure(0.5)"]], performance["Fmeasure",])
-  
-  performance <- apply(predictions, 2, function(x) performance.calculation(testing[,dep], x, threshold = 0.3))
-  results[["Fmeasure(0.3)"]] <- rbind(results[["Fmeasure(0.3)"]], performance["Fmeasure",])
-  
-  performance <- apply(predictions, 2, function(x) performance.calculation(testing[,dep], x, threshold = 0.7))
-  results[["Fmeasure(0.7)"]] <- rbind(results[["Fmeasure(0.7)"]], performance["Fmeasure",])
-}
-saveRDS(results, "step4.rds")
+levels <- c("C50.100trials","RF.100trees","C50.1trial","RF.10trees","GLM")
+g1<- ggplot(melt(data.frame(results[["Fmeasure(0.5)"]])), aes(x=factor(variable, levels=levels), y=value)) + geom_boxplot()  + ylab("F-measure (0.5)") + xlab("") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + scale_y_continuous(labels=0:7*0.1, breaks=0:7*0.1, limit=c(0, 0.7))
 
-levels <- c("C50.100trials","RF.100trees","C50.1trial","RF.10trees","FFTrees","GLM")
-g1<- ggplot(melt(data.frame(results[["Fmeasure(0.5)"]])), aes(x=factor(variable, levels=levels), y=value)) + geom_boxplot() + scale_y_continuous(labels=0:40*0.2, breaks=0:40*0.2, limit=c(0.4,1)) + ylab("F-measure (0.5)") + xlab("") + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+g2<- ggplot(melt(data.frame(results[["Fmeasure(0.8)"]]),na.rm=TRUE), aes(x=factor(variable, levels=levels), y=value)) + geom_boxplot() + ylab("F-measure (0.8)") + xlab("") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + scale_y_continuous(labels=0:7*0.1, breaks=0:7*0.1, limit=c(0, 0.7))
 
-g2<- ggplot(melt(data.frame(results[["Fmeasure(0.7)"]]),na.rm=TRUE), aes(x=factor(variable, levels=levels), y=value)) + geom_boxplot() + scale_y_continuous(labels=0:40*0.2, breaks=0:40*0.2, limit=c(0.4,1)) + ylab("F-measure (0.7)") + xlab("") + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+g3<- ggplot(melt(data.frame(results[["Fmeasure(0.2)"]]),na.rm=TRUE), aes(x=factor(variable, levels=levels), y=value)) + geom_boxplot()  + ylab("F-measure (0.2)") + xlab("") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + scale_y_continuous(labels=0:7*0.1, breaks=0:7*0.1, limit=c(0, 0.7))
 
-g3<- ggplot(melt(results[["AUC"]]), aes(x=reorder(Var2, -value, median), y=value)) + geom_boxplot() + scale_y_continuous(labels = 7:10*0.1, limit=c(0.7,1)) + ylab("AUC") + xlab("") + theme(axis.text.x = element_text(angle = 45, hjust = 1))
-
-pdf("4-5-parameter-and-thresholds.pdf",width=10,height=4)
+pdf("figures/Dont2-probability-thresholds.pdf",width=10,height=4)
 grid.arrange(g1,g2,g3,ncol=3)
-dev.off()       
+dev.off()   
 
 
 ############################################################
-
-# STEP4: AUC is not sensitive to imbalanced data (especially, for high EPV values)
-
-results <- list()
-indep <- AutoSpearman(data, lucene$indep)
-f <- as.formula(paste( "RealBug", '~', paste(indep, collapse = "+")))
-for(i in seq(1,100)){
-  set.seed(1234+i)
-  indices <- sample(nrow(data), replace=TRUE)
-  training <- data[indices,]
-  testing <- data[-indices,]
-  undersample <- downSample(training[,indep], training[,dep], yname = "RealBug")
-  oversample <- upSample(training[,indep], training[,dep], yname = "RealBug")
-  smotesample <- SMOTE(f, data=training)
-  
-  original.m <- glm(f, data = training, family="binomial")
-  under.m <- glm(f, data = undersample, family="binomial")
-  over.m <- glm(f, data = oversample, family="binomial")
-  smote.m <- glm(f, data = smotesample, family="binomial")
-  
-  predictions <- data.frame(
-    Original = predict(original.m, testing, type="response"),
-    Under = predict(under.m, testing, type="response"),
-    Over = predict(over.m, testing, type="response"),
-    SMOTE = predict(smote.m, testing, type="response")
-  )
-  
-  performance <- apply(predictions, 2, function(x) performance.calculation(testing[,dep], x))
-  results[["AUC"]] <- rbind(results[["AUC"]], performance["AUC",])
-  results[["Fmeasure"]] <- rbind(results[["Fmeasure"]], performance["Fmeasure",])
-  results[["Precision"]] <- rbind(results[["Precision"]], performance["Precision",])
-  results[["Recall"]] <- rbind(results[["Recall"]], performance["Recall",])
-}  
-
-finalresults <- data.frame(rbind(results[["AUC"]], results[["Precision"]], results[["Recall"]], results[["Fmeasure"]]))
-finalresults$measure <- c(rep("AUC",100),rep("Precision",100),rep("Recall",100),rep("Fmeasure",100))
-
-ggplot(melt(finalresults), aes(x=variable, y=value)) + geom_boxplot() + facet_wrap(~measure)  + ylab("") + xlab("") + theme(axis.text.x = element_text(angle = 45, hjust = 1))
-ggsave("class-imbalance.pdf",width=5,height=5)
-
-
+# STEP5: USE OUT-OF-SAMPLE BOOTSTRAP
 ############################################################
 
-# BOOT VS CV
+results <- NULL
+indep <- AutoSpearman(data, eclipse$indep)
+f <- as.formula(paste( "post", '~', paste(indep, collapse = "+")))
 
-boot <- NULL
-indep <- AutoSpearman(data, lucene$indep)
-f <- as.formula(paste( "RealBug", '~', paste(indep, collapse = "+")))
 for(i in seq(1,100)){
   set.seed(1234+i)
   indices <- sample(nrow(data), replace=TRUE)
   training <- data[indices,]
   testing <- data[-indices,]
   
-  m <- C5.0(x = training[, indep], y = training[,dep], rules=TRUE, trials=100)
-  predictions <- predict(m, testing, type="prob")[,"TRUE"]
+  m <- glm(f, data = training, family="binomial")
+  predictions <- predict(glm.model, testing, type="response")
   performance <- performance.calculation(testing[,dep], predictions)
-  boot <- rbind(boot, performance)
+  results <- rbind(results, c(method="100 Bootstrap",performance["AUC"]))
 }
 
 # 10x10-folds CV
-cv <- NULL
 for(i in seq(1,10)){
   set.seed(1234+i)
   indices <- createFolds(data[, dep], k = 10, list = TRUE, returnTrain = TRUE)
   for(i in seq(1,10)){
     training <- data[indices[[i]],]
     testing <- data[-indices[[i]],]
-    m <- C5.0(x = training[, indep], y = training[,dep], rules=TRUE, trials=100)
-    predictions <- predict(m, testing, type="prob")[,"TRUE"]
+    
+    m <- glm(f, data = training, family="binomial")
+    predictions <- predict(glm.model, testing, type="response")
     performance <- performance.calculation(testing[,dep], predictions)
-    cv <- rbind(cv, performance)
+    results <- rbind(results, c(method="10X10-Fold CV",performance["AUC"]))
   }
 }
 
-results <- data.frame(rbind(cv,boot))
-results$mvt <- c(rep("10x10Folds",100),rep("OOS-Bootstrap",100))
+results <- data.frame(results)
+results$AUC <- as.numeric(as.character(results$AUC))
 
-ggplot(melt(results[,c("AUC","Fmeasure","mvt")]), aes(x=mvt, y=value)) + geom_boxplot() + ylab("value") + xlab("") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + facet_wrap(~variable) + scale_y_continuous(labels=5:10*0.1, breaks=5:10*0.1, limit=c(0.5,1))
-ggsave("step7-fulldatasets.pdf",width=4,height=5)
-
-############################################################
-
-# STEP8: USE ANOVA TYPE-II, INSTEAD OF TYPE-I
-
-indep <- AutoSpearman(data, lucene$indep)
-f <- as.formula(paste( "RealBug", '~', paste(indep, collapse = "+")))
-m <- glm(f, data=data, family="binomial")
-importance1 <- data.frame(M1.Type1=anova(m)$Deviance[-1], M1.Type2=Anova(m,type="2",test="LR")$"LR Chisq")
-rownames(importance1) <- indep
-
-indep <- sample(indep)
-f <- as.formula(paste( "RealBug", '~', paste(indep, collapse = "+")))
-m <- glm(f, data=data, family="binomial")
-importance2 <- data.frame(M2.Type1=anova(m)$Deviance[-1], M2.Type2=Anova(m,type="2",test="LR")$"LR Chisq")
-rownames(importance2) <- indep
-
-importance <- data.frame(importance1[indep,],importance2[indep,])
-importance <- data.frame(apply(importance, 2, function(x){x/sum(abs(x))}))
-
-round(importance[order(-importance$M1.Type2),], digit=2)*100
-
+ggplot(melt(results), aes(x=method, y=value)) + geom_boxplot() + ylab("value") + xlab("") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + facet_wrap(~variable, scales="free_y") 
+ggsave("figures/5-model-validation.pdf",width=4,height=5)
 
 ############################################################
+# STEP6: SUMMARIZE BY A ScottKnott-ESD TEST 
+############################################################
 
-# STEP9: SUMMARIZE BY A ScottKnott-ESD TEST : goal is to look at confidence interval
 importance <- NULL
-indep <- AutoSpearman(data, lucene$indep)
-f <- as.formula(paste( "RealBug", '~', paste(indep, collapse = "+")))
+indep <- AutoSpearman(data, eclipse$indep)
+f <- as.formula(paste( "post", '~', paste(indep, collapse = "+")))
 for(i in seq(1,100)){
-  set.seed(1234+i)
   indices <- sample(nrow(data), replace=TRUE)
   training <- data[indices,]
   m <- glm(f, data = training, family="binomial")
@@ -274,53 +254,83 @@ for(i in seq(1,100)){
 importance <- data.frame(importance)
 colnames(importance) <- indep
 
-plot(sk_esd(importance))
+df <- melt(importance)
+df$rank <- sk_esd(importance)$groups[as.character(df$variable)]
+
+ggplot(df, aes(x=variable, y=value)) + geom_boxplot() + facet_grid(~rank, scales = "free", drop = TRUE) + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+ggsave("figures/6-scottknott.pdf",width=5,height=5)
 
 ############################################################
-
+# STEP7: VISUALIZE THE RELATIONSHIPS
+############################################################
+indep <- AutoSpearman(data, eclipse$indep)
+f <- as.formula(paste( "post", '~', paste(indep, collapse = "+")))
 m <- glm(f, data = data, family="binomial")
-plot(allEffects(m))
-plot(effect("OWN_COMMIT",m))
-plot(effect("MAJOR_LINE",m))
-
-# Model Diagnostic
-# https://ms.mcmaster.ca/~bolker/R/misc/modelDiag.html
-
-
-
-
-
-
-
-
-
-# 2.1 Check data type
-summary(data$SumCyclomatic)
-
-# 2.1 Test of normality
-shapiro.test(data$SumCyclomatic)
-
-# 2.1 Hypothesis Testing (CC)
-wilcox.test(data[data$RealBug==TRUE,]$SumCyclomatic, data[data$RealBug==FALSE,]$SumCyclomatic)
-
-# 2.1 Generate a density plot
-ggplot(data, aes(x=SumCyclomatic, fill=RealBug)) + geom_density(alpha=.3) + scale_x_log10() + theme_bw()
-ggsave("2.1-density-plot.pdf", width=4, height=2)
-
-# 2.1 Hypothesis Testing (CC) / alternative
-wilcox.test(data[data$RealBug==TRUE,]$SumCyclomatic, data[data$RealBug==FALSE,]$SumCyclomatic, alternative = "greater")
-wilcox.test(data[data$RealBug==TRUE,]$SumCyclomatic, data[data$RealBug==FALSE,]$SumCyclomatic, alternative = "less")
-
-# 2.2 Effect size analysis
-cliff.delta(data[data$RealBug==TRUE,]$SumCyclomatic, data[data$RealBug==FALSE,]$SumCyclomatic)
-cliff.delta(data[data$RealBug==TRUE,]$CountLine, data[data$RealBug==FALSE,]$CountLine)
-
-# 2.3 Multivariate Analysis
-
-g1 <- ggplot(data, aes(x=SumCyclomatic, fill=RealBug)) + geom_density(alpha=.3) + scale_x_log10() + theme_bw() + theme(legend.position="top")
-g2 <- ggplot(data, aes(x=ADEV, fill=RealBug)) + geom_density(alpha=.3) + scale_x_log10() + theme_bw() + theme(legend.position="top")
-g3 <- ggplot(data, aes(x=CountLine, fill=RealBug)) + geom_density(alpha=.3) + scale_x_log10() + theme_bw() + theme(legend.position="top")
-g4 <- ggplot(data, aes(x=Del_lines, fill=RealBug)) + geom_density(alpha=.3) + scale_x_log10() + theme_bw() + theme(legend.position="top")
-pdf("2.3-multivariate.pdf", width=5, height=5)
-grid.arrange(g1,g2,g3,g4, ncol=2)
+pdf("figures/7-relationship.pdf",width=4,height=4)
+plot(effect("pre",m))
 dev.off()
+
+############################################################
+# DON'T USE ANOVA TYPE-I
+############################################################
+
+indep1 <- c("TLOC","NSF_max","NSM_max","NOF_max")
+f <- as.formula(paste0(dep, " ~ ", paste0(indep1,collapse = "+")))
+m <- glm(f, data=data, family="binomial")
+anova(m)
+Anova(m)
+
+# ANOVA Explaination
+
+### The Deviance of MaxInheritanceTree for ANOVA Type-I
+glm(post ~  1, data=data, family="binomial")$deviance - glm(post ~  MaxInheritanceTree, data=data, family="binomial")$deviance
+
+### The Deviance of MaxInheritanceTree for ANOVA Type-II
+glm(post ~  CountClassDerived + AvgLineBlank  +  MINOR_LINE + CountClassCoupled, data=data, family="binomial")$deviance-glm(post ~  MaxInheritanceTree + CountClassDerived + AvgLineBlank  +  MINOR_LINE + CountClassCoupled, data=data, family="binomial")$deviance
+
+# Risks or reordering
+
+indep1 <- c("NSF_max","NSM_max","NOF_max","ACD")
+f <- as.formula(paste0(dep, " ~ ", paste0(indep1,collapse = "+")))
+m <- glm(f, data=data, family="binomial")
+
+anova(m)
+Anova(m)
+
+importance1 <- data.frame(Type1.1=anova(m)$Deviance[-1], Type2.1=Anova(m,type="2",test="LR")$"LR Chisq")
+rownames(importance1) <- indep1
+
+indep2 <- c("NSM_max","ACD","NSF_max","NOF_max")
+f <- as.formula(paste0(dep, " ~ ", paste0(indep2,collapse = "+")))
+m <- glm(f, data=data, family="binomial")
+importance2 <- data.frame(Type1.2=anova(m)$Deviance[-1], Type2.2=Anova(m,type="2",test="LR")$"LR Chisq")
+rownames(importance2) <- indep2
+
+importance <- data.frame(importance1[indep1,],importance2[indep1,])
+importance <- data.frame(apply(importance, 2, function(x){x/sum(abs(x))}))
+
+round(importance[order(-importance$Type2.1),], digit=2)*100
+
+################################################
+# DON’T REBALANCE THE DATA
+################################################
+
+indep <- c("TLOC","PAR_max",'NOI',"NOF_max","FOUT_max","NSM_max","NSF_max","ACD","NOM_max")
+
+original.m <- fit(data, dep, indep, classifier="lr", rebalance="no", validation="boot")
+down.m <- fit(data, dep, indep, classifier="lr", rebalance="down", validation="boot")
+up.m <- fit(data, dep, indep, classifier="lr", rebalance="up", validation="boot")
+
+auc <- data.frame(Original=original.m$performance$AUC, 
+                  UnderSampling=down.m$performance$AUC,
+                  OverSampling=up.m$performance$AUC)
+g1 <- ggplot(melt(auc), aes(x=variable, y=value)) + geom_boxplot() + theme_bw() + ylab("AUC Performance") + xlab("") + scale_y_continuous(breaks=12:20*0.05, limits = c(0.6,0.9)) + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+fmeasure <- data.frame(Original=original.m$performance$Fmeasure, 
+                       UnderSampling=down.m$performance$Fmeasure,
+                       OverSampling=up.m$performance$Fmeasure)
+g2 <- ggplot(melt(fmeasure), aes(x=variable, y=value)) + geom_boxplot() + theme_bw() + ylab("F-Measure Performance") + xlab("") + scale_y_continuous(breaks=4:10*0.05, limits = c(0.2,0.5)) + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+grid.arrange(g1,g2, ncol=2)
+
+ggsave("figures/3-class-imbalance.pdf",width=5,height=5)

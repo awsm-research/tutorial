@@ -1,4 +1,4 @@
-devtools::install_github("awsm-research/Rnalytica", upgrade="always")
+devtools::install_github("awsm-research/Rnalytica")
 install.packages("ggplot2")
 install.packages("car")
 install.packages("effects")
