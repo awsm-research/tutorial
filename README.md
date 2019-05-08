@@ -1,4 +1,8 @@
-# Software Analytics 101
+# Welcome to Software Analytics Cookbook
+
+![Cover](/resources/software-analytics-cookbook-cover.jpg)
+
+
 
 Jupyter+R: [![Binder](http://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/awsm-research/mining-software-defects/master?filepath=Modelling-Software-Data.ipynb)
 
