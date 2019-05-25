@@ -1,7 +1,6 @@
-# Welcome to Software Analytics Cookbook
+# Welcome to Software Analytics Tutorial
 
-![Cover](/resources/software-analytics-cookbook-cover.jpg)
-
+<img src="./resources/software-analytics-tutorial-cover.jpg" width="500">
 
 
 Jupyter+R: [![Binder](http://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/awsm-research/mining-software-defects/master?filepath=Modelling-Software-Data.ipynb)
