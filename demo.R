@@ -3,7 +3,8 @@ getwd()
 
 source("import.R")
 
-str(data[,indep])
+library(Hmisc)
+describe(data)
 
 table(data[,dep])/nrow(data)
 
@@ -17,6 +18,8 @@ pdf("figures/0-intro-regression.pdf",width=4, height=3)
 plot(allEffects(m))
 dev.off()
 
+sp <- spearman2(formula(paste("post" ," ~ ",paste0(indep, collapse=" + "))), data= data, p=2)
+plot(sp)
 ################################################
 # INTRO: PRELIMINARY DATA ANALYSIS
 ################################################
@@ -123,42 +126,44 @@ dev.off()
 # STEP4: Explore different parameter settings
 ################################################
 
-# results <- list()
-# for(i in seq(1,10)){
-#   set.seed(i)
-#   indices <- sample(nrow(data), replace=TRUE)
-#   training <- data[indices,]
-#   testing <- data[-indices,]
-#   indep <- AutoSpearman(training, eclipse$indep)
-#   f <- as.formula(paste( "post", '~', paste(indep, collapse = "+")))
-#   
-#   glm.model <- glm(f, data = training, family="binomial")
-#   defaulttree.model <- C5.0(x = training[, indep], y = training[,dep], rules=TRUE, trials=1)
-#   optimaltree.model <- C5.0(x = training[, indep], y = training[,dep], rules=TRUE, trials=100)
-#   rf10trees.model <- randomForest(f, data = training, importance = TRUE, ntree=10)
-#   rf100trees.model <- randomForest(f, data = training, importance = TRUE, ntree=100)
-# 
-#   predictions <- data.frame(
-#     GLM = predict(glm.model, testing, type="response"),
-#     C50.1trial = predict(defaulttree.model, testing, type="prob")[,"TRUE"],
-#     C50.100trials = predict(optimaltree.model, testing, type="prob")[,"TRUE"],
-#     RF.10trees = predict(rf10trees.model, testing, type="prob")[,"TRUE"],
-#     RF.100trees = predict(rf100trees.model, testing, type="prob")[,"TRUE"]
-#   )
-#   performance <- apply(predictions, 2, function(x) performance.calculation(testing[,dep], x))
-#   results[["AUC"]] <- rbind(results[["AUC"]], performance["AUC",])
-#   results[["Fmeasure(0.5)"]] <- rbind(results[["Fmeasure(0.5)"]], performance["Fmeasure",])
-#   
-#   performance <- apply(predictions, 2, function(x) performance.calculation(testing[,dep], x, threshold = 0.2))
-#   results[["Fmeasure(0.2)"]] <- rbind(results[["Fmeasure(0.2)"]], performance["Fmeasure",])
-#   
-#   performance <- apply(predictions, 2, function(x) performance.calculation(testing[,dep], x, threshold = 0.8))
-#   results[["Fmeasure(0.8)"]] <- rbind(results[["Fmeasure(0.8)"]], performance["Fmeasure",])
-# }
-# saveRDS(results, "figures/parameter-settings.rds")
+results <- list()
+for(i in seq(1,100)){
+  set.seed(i)
+  indices <- sample(nrow(data), replace=TRUE)
+  training <- data[indices,]
+  testing <- data[-indices,]
+  indep <- AutoSpearman(training, eclipse$indep)
+  f <- as.formula(paste( "post", '~', paste(indep, collapse = "+")))
+
+  glm.model <- glm(f, data = training, family="binomial")
+  defaulttree.model <- C5.0(x = training[, indep], y = training[,dep], rules=TRUE, trials=1)
+  optimaltree.model <- C5.0(x = training[, indep], y = training[,dep], rules=TRUE, trials=100)
+  rf10trees.model <- randomForest(f, data = training, importance = TRUE, ntree=10)
+  rf100trees.model <- randomForest(f, data = training, importance = TRUE, ntree=100)
+
+  predictions <- data.frame(
+    GLM = predict(glm.model, testing, type="response"),
+    C50.1trial = predict(defaulttree.model, testing, type="prob")[,"TRUE"],
+    C50.100trials = predict(optimaltree.model, testing, type="prob")[,"TRUE"],
+    RF.10trees = predict(rf10trees.model, testing, type="prob")[,"TRUE"],
+    RF.100trees = predict(rf100trees.model, testing, type="prob")[,"TRUE"]
+  )
+  performance <- apply(predictions, 2, function(x) performance.calculation(testing[,dep], x))
+  results[["AUC"]] <- rbind(results[["AUC"]], performance["AUC",])
+  results[["Fmeasure(0.5)"]] <- rbind(results[["Fmeasure(0.5)"]], performance["Fmeasure",])
+
+  performance <- apply(predictions, 2, function(x) performance.calculation(testing[,dep], x, threshold = 0.2))
+  results[["Fmeasure(0.2)"]] <- rbind(results[["Fmeasure(0.2)"]], performance["Fmeasure",])
+
+  performance <- apply(predictions, 2, function(x) performance.calculation(testing[,dep], x, threshold = 0.8))
+  results[["Fmeasure(0.8)"]] <- rbind(results[["Fmeasure(0.8)"]], performance["Fmeasure",])
+}
+saveRDS(results, "figures/parameter-settings.rds")
 
 results <- readRDS("figures/parameter-settings.rds")
-ggplot(melt(results[["AUC"]]), aes(x=reorder(Var2, -value, median), y=value)) + geom_boxplot()  + ylab("AUC") + xlab("") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + scale_y_continuous(breaks = 10:18*0.05, labels = 10:18*0.05, limit=c(0.5,0.9))
+df <- melt(results[["AUC"]])
+df$Var2 <- factor(df$Var2, levels=c("C50.1trial","C50.100trials","RF.10trees","RF.100trees","GLM"))
+ggplot(df, aes(x=Var2, y=value)) + geom_boxplot()  + ylab("AUC") + xlab("") + theme(axis.text.x = element_text(angle = 45, hjust = 1)) + scale_y_continuous(breaks = 10:18*0.05, labels = 10:18*0.05, limit=c(0.5,0.9))
 ggsave("figures/4-parameter-settings.pdf",width=4,height=4)
 
 ############################################################
