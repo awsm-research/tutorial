@@ -22,7 +22,7 @@ Begin by cloning or downloading the tutorial GitHub project [https://github.com/
 
 To run this tutorial on Jupyter ANYTIME and ANYWHERE, please access Binder the following command:
 
-Jupyter+R: [![Binder](http://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/awsm-research/mining-software-defects/master?filepath=Modelling-Software-Data.ipynb)
+Jupyter+R: [![Binder](http://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/awsm-research/mining-software-defects/master?filepath=Software-Analytics-In-Action.ipynb)
 
 RStudio: [![Binder](http://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/awsm-research/mining-software-defects/master?urlpath=rstudio)
 
