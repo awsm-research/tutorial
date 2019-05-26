@@ -1,13 +1,13 @@
-# Software Analytics in Action
+# Software Analytics in Action [![Binder](http://mybinder.org/badge_logo.svg)](https://mybinder.org/v2/gh/awsm-research/mining-software-defects/master?filepath=Software-Analytics-In-Action.ipynb)
 
 ### A Hands-on Tutorial on Mining, Analyzing, Modelling, and Explaining Software Data
 
 
 Presented by Dr. Chakkrit (Kla) Tantithamthavorn at the International Conference on Mining Software Repositories (MSR): [Education Track](https://2019.msrconf.org/track/msr-2019-Education?track=MSR%20%20Education#program) on May 26, 2019. 
 
+[![Slideshare](https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRa8GqWGjjaJB2jz3t_HuNxaL_xdhGCFgVCqj9MqJMx07EUK77uKQ)](https://www.slideshare.net/klainfo/software-analytics-in-action-a-handson-tutorial-on-mining-analyzing-modelling-and-explaining-software-data/klainfo/software-analytics-in-action-a-handson-tutorial-on-mining-analyzing-modelling-and-explaining-software-data)
+
 <img src="./resources/software-analytics-tutorial-cover.jpg" width="500">
-
-
 
 # Tutorial Abstract
 
